@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#f6f6f7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="日记待办">
+<title>日记 · 待办</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🗓️</span>
+      <div>
+        <h1>日记 · 待办</h1>
+        <p class="storage-hint" id="storageHint">数据保存在浏览器 IndexedDB</p>
+      </div>
+    </div>
+    <button class="theme-btn" id="themeBtn" title="切换深浅色">🌙</button>
+  </header>
+
+  <nav class="datebar">
+    <button class="nav-btn" id="prevBtn" title="前一天">‹</button>
+    <div class="date-center">
+      <span class="weekday" id="weekday"></span>
+      <input type="date" id="dateInput" class="date-input">
+      <button class="today-btn" id="todayBtn">今天</button>
+    </div>
+    <button class="nav-btn" id="nextBtn" title="后一天">›</button>
+  </nav>
+
+  <main class="grid">
+    <section class="card">
+      <h2 class="card-title">每日待办 <span class="count" id="taskCount"></span></h2>
+      <div class="add-row">
+        <input id="taskInput" type="text" placeholder="添加新任务，回车确认" maxlength="200">
+        <button id="addTaskBtn" title="添加">＋</button>
+      </div>
+      <ul class="task-list" id="taskList"></ul>
+      <p class="empty" id="taskEmpty">今天还没有任务，添加一条吧</p>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">日记</h2>
+      <textarea id="diaryInput" class="diary-input" placeholder="记录今天…"></textarea>
+      <div class="save-status" id="saveStatus">所有更改自动保存</div>
+    </section>
+  </main>
+
+  <section class="card history-card">
+    <h2 class="card-title">历史记录</h2>
+    <div class="history-list" id="historyList"></div>
+    <p class="empty" id="historyEmpty">还没有任何记录，写一篇日记或添加任务吧</p>
+  </section>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

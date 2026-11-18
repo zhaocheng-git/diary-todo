@@ -1,0 +1,26 @@
+{
+  "name": "diary-todo",
+  "version": "1.0.0",
+  "description": "日记 + 每日待办 一体化应用（网页版 + Electron 桌面版）",
+  "main": "main.js",
+  "author": "zhaocheng",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:dir": "electron-builder --dir"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.zhaocheng.diarytodo",
+    "productName": "日记待办",
+    "files": ["index.html", "styles.css", "app.js", "main.js", "preload.js"],
+    "directories": { "output": "dist" },
+    "win": { "target": "portable" },
+    "mac": { "target": "dmg", "category": "public.app-category.productivity" },
+    "linux": { "target": "AppImage", "category": "Utility" }
+  }
+}
