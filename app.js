@@ -1,6 +1,7 @@
 // ============================================================
 // 日记 · 待办 —— 应用逻辑（网页版 & Electron 桌面版共用）
-// 存储抽象：网页版用 IndexedDB；桌面版用 window.electronAPI 读写本地 diary 文件夹
+// 存储抽象：网页版用 localStorage（iOS 兼容性/持久化最可靠）；
+//           桌面版用 window.electronAPI 读写本地 diary 文件夹
 // ============================================================
 (function () {
   "use strict";
@@ -22,12 +23,12 @@
   }
 
   /* ---------- 存储抽象 ----------
-     两种实现暴露相同接口：
+     两种实现暴露相同接口（均返回 Promise）：
        getAll()        -> Promise<Record[]>  所有有记录的日期（含 date/diary/tasks）
        getDate(date)   -> Promise<Record|null>
        saveDay(record) -> Promise<any>
        deleteDay(date) -> Promise<any>
-     桌面版通过 preload.js 暴露的 window.electronAPI 走本地文件；网页版走 IndexedDB。 */
+     桌面版走本地文件；网页版走 localStorage（按日期一个 key，前缀 dtd:）。 */
   var Storage = (function () {
     if (typeof window.electronAPI !== "undefined") {
       var api = window.electronAPI;
@@ -45,38 +46,76 @@
       };
     }
 
-    var DB_NAME = "diary-todo", DB_VER = 1, STORE = "days", dbPromise = null;
-    function openDB() {
-      if (dbPromise) return dbPromise;
-      dbPromise = new Promise(function (resolve, reject) {
-        var req = indexedDB.open(DB_NAME, DB_VER);
+    // --- 网页版：localStorage ---
+    var PREFIX = "dtd:";
+    function lsAll() {
+      var out = [];
+      try {
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (k && k.indexOf(PREFIX) === 0) {
+            try { out.push(JSON.parse(localStorage.getItem(k))); } catch (e) {}
+          }
+        }
+      } catch (e) {}
+      return Promise.resolve(out);
+    }
+    function lsGet(date) {
+      try {
+        var raw = localStorage.getItem(PREFIX + date);
+        return Promise.resolve(raw ? JSON.parse(raw) : null);
+      } catch (e) { return Promise.resolve(null); }
+    }
+    function lsSave(rec) {
+      try {
+        localStorage.setItem(PREFIX + rec.date, JSON.stringify(rec));
+        return Promise.resolve(true);
+      } catch (e) { return Promise.reject(e); }
+    }
+    function lsDel(date) {
+      try { localStorage.removeItem(PREFIX + date); } catch (e) {}
+      return Promise.resolve(true);
+    }
+
+    // 请求浏览器把本站数据标记为「持久」，降低被系统自动清理的概率
+    if (navigator.storage && navigator.storage.persist) {
+      try { navigator.storage.persist().catch(function () {}); } catch (e) {}
+    }
+
+    return { type: "localstorage", getAll: lsAll, getDate: lsGet, saveDay: lsSave, deleteDay: lsDel };
+  })();
+
+  /* ---------- 旧版 IndexedDB 数据一次性迁移到 localStorage ---------- */
+  function migrateFromIndexedDB() {
+    return new Promise(function (resolve) {
+      try {
+        // localStorage 已有数据则跳过
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (k && k.indexOf("dtd:") === 0) { resolve(); return; }
+        }
+        if (!window.indexedDB) { resolve(); return; }
+        var req = indexedDB.open("diary-todo", 1);
         req.onupgradeneeded = function (e) {
           var db = e.target.result;
-          if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: "date" });
+          if (!db.objectStoreNames.contains("days")) db.createObjectStore("days", { keyPath: "date" });
         };
-        req.onsuccess = function () { resolve(req.result); };
-        req.onerror = function () { reject(req.error); };
-      });
-      return dbPromise;
-    }
-    function run(mode, fn) {
-      return openDB().then(function (db) {
-        return new Promise(function (resolve, reject) {
-          var t = db.transaction(STORE, mode);
-          var req = fn(t.objectStore(STORE));
-          req.onsuccess = function () { resolve(req.result); };
-          req.onerror = function () { reject(req.error); };
-        });
-      });
-    }
-    return {
-      type: "indexeddb",
-      getAll: function () { return run("readonly", function (s) { return s.getAll(); }); },
-      getDate: function (date) { return run("readonly", function (s) { return s.get(date); }); },
-      saveDay: function (rec) { return run("readwrite", function (s) { return s.put(rec); }); },
-      deleteDay: function (date) { return run("readwrite", function (s) { return s.delete(date); }); }
-    };
-  })();
+        req.onsuccess = function () {
+          try {
+            var g = req.result.transaction("days", "readonly").objectStore("days").getAll();
+            g.onsuccess = function () {
+              (g.result || []).forEach(function (rec) {
+                if (rec && rec.date) { try { localStorage.setItem("dtd:" + rec.date, JSON.stringify(rec)); } catch (e) {} }
+              });
+              resolve();
+            };
+            g.onerror = function () { resolve(); };
+          } catch (e) { resolve(); }
+        };
+        req.onerror = function () { resolve(); };
+      } catch (e) { resolve(); }
+    });
+  }
 
   /* ---------- 应用状态 ---------- */
   var currentDate = todayStr();
@@ -204,12 +243,19 @@
     });
   }
 
+  // 保存当天记录；成功返回 true，失败返回 false（并把原因显示在界面上）
   function persist() {
     var hasContent = (currentDay.diary || "").trim() || (currentDay.tasks || []).length;
     var p = hasContent
       ? Storage.saveDay(currentDay)
       : Storage.deleteDay(currentDate).then(function () { return null; });
-    return p.then(function () { return loadAll(); }).then(renderHistory);
+    return p.then(function () { return loadAll(); })
+      .then(function () { renderHistory(); return true; })
+      .catch(function (err) {
+        el.saveStatus.textContent = "保存失败：" + (err && err.message ? err.message : "存储不可用");
+        if (window.console) console.error("保存失败", err);
+        return false;
+      });
   }
 
   function saveDiaryDebounced() {
@@ -217,8 +263,8 @@
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
       currentDay.diary = el.diaryInput.value;
-      persist().then(function () {
-        el.saveStatus.textContent = "已保存 " + nowHM();
+      persist().then(function (ok) {
+        el.saveStatus.textContent = ok ? "已保存 " + nowHM() : "保存失败";
       });
     }, 500);
   }
@@ -267,9 +313,10 @@
   function init() {
     el.storageHint.textContent = Storage.type === "electron"
       ? "桌面版 · 数据保存在「文档/diary」文件夹"
-      : "网页版 · 数据保存在浏览器 IndexedDB";
+      : "网页版 · 数据保存在浏览器本地存储";
     applyTheme();
-    loadAll().then(function () { return setDate(todayStr()); });
+    migrateFromIndexedDB().then(function () { return loadAll(); })
+      .then(function () { return setDate(todayStr()); });
   }
 
   init();
